@@ -211,7 +211,10 @@ int main() {
                 while ((dirp = readdir(dp)) != NULL) {                
                     // Build the full path to the file
                     char path[1024];
-                    snprintf(path, sizeof(path), "./%s", dirp->d_name);
+                    if (argc == 3)
+                        snprintf(path, sizeof(path), "./%s/%s", argv[2], dirp->d_name);
+                    else
+                        snprintf(path, sizeof(path), "./%s", dirp->d_name);
 
                     // Get file status
                     if (stat(path, &buf) == 0) {
@@ -268,7 +271,11 @@ int main() {
                 while ((dirp = readdir(dp)) != NULL) {                
                     // Build the full path to the file
                     char path[1024];
-                    snprintf(path, sizeof(path), "./%s", dirp->d_name);
+                    if (argc != 3)
+                        snprintf(path, sizeof(path), "./%s", dirp->d_name);
+                    else
+                        snprintf(path, sizeof(path), "./%s/%s", argv[2], dirp->d_name);
+                    
 
                     // Get file status
                     if (stat(path, &buf) == 0) {
@@ -286,12 +293,13 @@ int main() {
 
                 // sort buffer strings before print
                 qsort(temp, index, sizeof(char *), compare_strings);
-                char cwd[128];
-                getcwd(cwd, 128);
                 
                 for (int i = 0; i < index; i++) {
                     if (temp[i][0] == '.') continue;
-                    snprintf(path, sizeof(path), "%s/%s", cwd, temp[i]);
+                    if (argc == 3)
+                        snprintf(path, sizeof(path), "./%s/%s", argv[2], temp[i]);
+                    else
+                        snprintf(path, sizeof(path), "./%s", temp[i]);
                     if (stat(path, &buf) == 0) {
                         print_file_info(&buf, temp[i]);
                     }
@@ -328,8 +336,11 @@ int main() {
                 while ((dirp = readdir(dp)) != NULL) {                
                     // Build the full path to the file
                     char path[1024];
-                    snprintf(path, sizeof(path), "./%s", dirp->d_name);
-
+                    if (argc == 3)
+                        snprintf(path, sizeof(path), "./%s/%s", argv[2], dirp->d_name);
+                    else
+                        snprintf(path, sizeof(path), "./%s", dirp->d_name);
+                    
                     // Get file status
                     if (stat(path, &buf) == 0) {
                         // Check if it is a directory
@@ -346,11 +357,12 @@ int main() {
 
                 // sort buffer strings before print
                 qsort(temp, index, sizeof(char *), compare_strings);
-                char cwd[128];
-                getcwd(cwd, 128);
                 
                 for (int i = 0; i < index; i++) {
-                    snprintf(path, sizeof(path), "%s/%s", cwd, temp[i]);
+                    if (argc == 3)
+                        snprintf(path, sizeof(path), "./%s/%s", argv[2], temp[i]);
+                    else
+                        snprintf(path, sizeof(path), "./%s", temp[i]);
                     if (stat(path, &buf) == 0) {
                         print_file_info(&buf, temp[i]);
                     }
@@ -385,7 +397,7 @@ int main() {
                 while ((dirp = readdir(dp)) != NULL) {                
                     // Build the full path to the file
                     char path[1024];
-                    snprintf(path, sizeof(path), "./%s", dirp->d_name);
+                    snprintf(path, sizeof(path), "./%s/%s", argv[1], dirp->d_name);
 
                     // Get file status
                     if (stat(path, &buf) == 0) {
@@ -459,7 +471,10 @@ int main() {
             while ((dirp = readdir(dp)) != NULL) {                
                 // Build the full path to the file
                 char path[1024];
-                snprintf(path, sizeof(path), "./%s", dirp->d_name);
+                if (argc == 2)
+                    snprintf(path, sizeof(path), "./%s/%s", argv[1], dirp->d_name);
+                else
+                    snprintf(path, sizeof(path), "./%s", dirp->d_name);
 
                 // Get file status
                 if (stat(path, &buf) == 0) {
@@ -477,11 +492,12 @@ int main() {
 
             // sort buffer strings before print
             qsort(temp, index, sizeof(char *), compare_strings);
-            char cwd[128];
-            getcwd(cwd, 128);
             
             for (int i = 0; i < index; i++) {
-                snprintf(path, sizeof(path), "%s/%s", cwd, temp[i]);
+                if (argc == 2)
+                    snprintf(path, sizeof(path), "./%s/%s", argv[1], temp[i]);
+                else
+                    snprintf(path, sizeof(path), "./%s", temp[i]);
                 if (stat(path, &buf) == 0) {
                     print_file_info(&buf, temp[i]);
                 }
