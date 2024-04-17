@@ -24,7 +24,7 @@
 #include <pwd.h>
 #include <grp.h>
 
-char output[1024] = {0};
+char* output;
 
 //////////////////////////////////////////////////////////////////////
 // compare_strings                                                  //
@@ -104,7 +104,8 @@ int main() {
     char* argv[64];
     char* token;
     char path[1024];
-    char buffer[1024];
+    output = (char*)malloc(1024 * sizeof(char));
+    char *buffer = (char*)malloc(1024 * sizeof(char));
     read(STDIN_FILENO, buffer, 1024);
 
     // parse data from client buffer
@@ -639,4 +640,7 @@ int main() {
     }
 
     write(STDOUT_FILENO, output, 1024);
+    free(buffer);
+    free(output);
+    return 0;
 }

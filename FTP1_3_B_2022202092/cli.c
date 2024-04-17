@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 //////////////////////////////////////////////////////////////////////
@@ -29,7 +30,7 @@
 //          and displaying non-option arguments                     //
 //////////////////////////////////////////////////////////////////////
 int main(int argc, char *argv[]) {
-    char buffer[1024] = {0}; // Buffer to store command outputs or messages
+    char *buffer = (char*)malloc(1024 * sizeof(char)); // Buffer to store command outputs or messages
 
     char c;// Variable to store the option character returned by getopt
     int aflag = 0, lflag = 0; // flag for option management
@@ -247,6 +248,7 @@ int main(int argc, char *argv[]) {
 
     //printf("%s", buffer);
     write(STDOUT_FILENO, buffer, 1024);
+    free(buffer);
 
     return 0;
 }
