@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -6,167 +8,140 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <bits/getopt_core.h>
+#include <arpa/inet.h>
 
 #define MAX_BUFF 10000
 #define RCV_BUFF 10000
+#define SERVER_ADDR "127.0.0.1"
 #define PORT 13428
 
+int socketConnection();
 int conv_cmd(char *buff, char *cmd_buff);
 
-void main(int argc, char **argv)
-{
+void process_result(char *result);
+
+int main(int argc, char** argv) {
     char buff[MAX_BUFF], cmd_buff[MAX_BUFF], rcv_buff[RCV_BUFF];
     int n;
+    int sockfd = socketConnection(); // get connection and save socket number
 
-    ///////////////////////// socket start /////////////////////////
-    int sockfd;
-    struct sockaddr_in server;
-
-    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
-    {
-        perror("socket");
-        exit(1);
-    }
-
-    memset((char *)&server, '\0', sizeof(server));
-    server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr("127.0.0.1");
-    server.sin_port = htons(PORT);
-
-    if (connect(sockfd, (struct sockaddr *)&server, sizeof(server)))
-    {
-        perror("connect");
-        exit(1);
-    }
-    ///////////////////////// socket ends /////////////////////////
-
-    /* open socket and connect to server */
-    for (;;)
-    {
+    while(sockfd != -1) {
+        memset(buff, 0, sizeof(buff)); // initialize buffer
+        printf("> ");
+        if (fgets(buff, sizeof(buff), stdin) == NULL) {
+            printf("input error\n");
+            break;
+        }
+        buff[strcspn(buff, "\n")] = '\0';
+        
         /* convert ls (including options) to NLST (including options) */
-        if (conv_cmd(buff, cmd_buff) < 0)
-        {
+        if (conv_cmd(buff, cmd_buff) != 0) {
             write(STDERR_FILENO, "conv_cmd() error!!\n", strlen("conv_cmd() error!!\n"));
+            close(sockfd);
             exit(1);
         }
 
-        if (send(sockfd, cmd_buff, strlen(cmd_buff) + 1, 0) == -1)
-        {
-            perror("send");
-            exit(1);
-        }
-
-        if (recv(sockfd, rcv_buff, sizeof(rcv_buff), 0) == -1)
-        {
-            perror("recv");
-            exit(1);
-        }
         n = strlen(cmd_buff);
-        if (write(sockfd, cmd_buff, n) != n)
-        {
-            write(STDERR_FILENO, "write() error!!\n", strlen("write() error!!\n"));
+        if(write(sockfd, cmd_buff, n) != n) {
+            write(STDERR_FILENO, "write() error!!\n", sizeof("write() error!!\n"));
+            close(sockfd);
+            exit(1);
+        } 
+        if((n = read(sockfd,rcv_buff, RCV_BUFF-1)) < 0) {
+            write(STDERR_FILENO,"read() error\n", sizeof("read() error\n"));
+            close(sockfd);
             exit(1);
         }
-        if ((n = read(sockfd, rcv_buff, RCV_BUFF - 1)) < 0)
-        {
-            write(STDERR_FILENO, "read() error\n", strlen("read() error\n"));
+        rcv_buff[n] = '\0'; // Ensure null-terminated string
+
+        if (strncmp(rcv_buff, "QUIT", 4) == 0) {
+            write(STDOUT_FILENO, "Program quit!!\n", strlen("Program quit!!\n"));
+            close(sockfd);
             exit(1);
         }
 
-        rcv_buff[n] = '\0';
-        if (!strcmp(rcv_buff, "QUIT"))
-        {
-            write(STDOUT_FILENO, "Program quit!!\n", strlen("Program quit!!\n"));
-            exit(1);
-        }
-        process_result(rcv_buff);
         /*display ls(including options) command result */
+        process_result(rcv_buff);
+        //memset(rcv_buff, 0, RCV_BUFF);
+        memset(cmd_buff, 0, MAX_BUFF);
+        //memset(buff, 0, MAX_BUFF);
+    }
+    
+    close(sockfd);
+    return 0;
+}
+
+void parse_options(int argc, char *argv[], int *aflag, int *lflag, int *oflag) {
+
+    for (int i = 1; i < argc; i++) {
+        if (argv[i][0] == '-') { // check if it is option
+            for (int j = 1; argv[i][j] != '\0'; j++) {
+                switch (argv[i][j]) {
+                    case 'a':
+                        *aflag = 1;
+                        break;
+                    case 'l':
+                        *lflag = 1;
+                        break;
+                    default:
+                        *oflag = 1; 
+                        return; 
+                }
+            }
+        }
     }
 }
 
-int conv_cmd(char *buff, char *cmd_buff)
-{
-    char c;                              // Variable to store the option character returned by getopt
+int conv_cmd(char *buff, char *cmd_buff) {
     int aflag = 0, lflag = 0;            // flag for option management
     int oflag = 0, xflag = 0, qflag = 0; // flag for error management
 
     char *token;
-    int argc = 1;
+    int argc = 0;
     char *argv[100];
     // parse data from client buffer
-    token = strtok(buff, " ");
-    while (token != NULL)
-    {
+    token = strtok(buff, " \n");
+    while (token != NULL) {
         argv[argc++] = token;      // Assign the token to argv and increment argc
-        token = strtok(NULL, " "); // Continue tokenizing the string
+        token = strtok(NULL, " \n"); // Continue tokenizing the string
     }
-    argv[argc--] = NULL;
+    argv[argc] = NULL;
 
-    opterr = 0; // Disable automatic error reporting by getopt
-
-    if (strcmp(argv[1], "ls") == 0)
-    {
-        // option check for ls
-        while ((c = getopt(argc, argv, "al")) != -1)
-        {
-            // Switch statement to handle the option character returned by getopt()
-            switch (c)
-            {
-            case 'a':      // If option 'a' is given
-                aflag = 1; // Set 'aflag' as 1
-                break;
-            case 'l':      // If option 'b' is given
-                lflag = 1; // Set 'bflag' as 1
-                break;
-            case '?': // If an unrecognized option is encountered
-                oflag = 1;
-            }
-        }
+    // If first argument is "ls"
+    if (strcmp(argv[0], "ls") == 0) {
+        parse_options(argc, argv, &aflag, &lflag, &oflag);
 
         strcpy(cmd_buff, "NLST"); // Start building the NLST command
 
         // Append appropriate flags to the command
-        if (aflag == 1 && lflag == 0)
-            strcat(cmd_buff, " -a");
-        else if (aflag == 0 && lflag == 1)
+        if (aflag == 1 && lflag == 0) 
+            strcat(cmd_buff, " -a");        
+        else if (aflag == 0 && lflag == 1) 
             strcat(cmd_buff, " -l");
-        else if (aflag == 1 && lflag == 1)
+        else if (aflag == 1 && lflag == 1) 
             strcat(cmd_buff, " -al");
-
+        
         // Append path if specified
-        if (strcmp(argv[argc - 1], "ls") != 0)
-        {
-            if (strcmp(argv[argc - 2], "ls") == 0)
-            {
-                strcat(cmd_buff, " ");
-                strcat(cmd_buff, argv[argc - 1]); // store path to temp
-            }
-            else
-                xflag = 1; // set error flag x: too many argument
+        char* temp = argv[argc - 1];
+        if (strcmp(temp, "ls") != 0 && temp[0] != '-') {
+            strcat(cmd_buff, " ");
+            strcat(cmd_buff, temp); // store path to temp
+            if (argc > 2)
+                if (strcmp(argv[argc - 2], "ls") != 0 && argv[argc - 2][0] != '-')
+                    xflag = 1; // set too many argument error flag
         }
+            
+        
     }
     // 'quit' command
-    else if (strcmp(argv[1], "quit") == 0)
-    {
-        // option check for dir
-        while ((c = getopt(argc, argv, "")) != -1)
-        {
-            // Switch statement to handle the option character returned by getopt()
-            switch (c)
-            {
-            case '?': // If an unrecognized option is encountered
-                oflag = 1;
-            }
-        }
-
+    else if (strcmp(argv[0], "quit") == 0) {
         // 'quit' command does not take any options or path
         strcpy(cmd_buff, "QUIT");
-        if (argc != 2)
+        if (argc != 1)
             qflag = 1;
     }
     // Unknown command
-    else
-    {
+    else {
         strcpy(cmd_buff, "Error: !");
         write(STDOUT_FILENO, cmd_buff, 1024);
         return 1;
@@ -179,4 +154,37 @@ int conv_cmd(char *buff, char *cmd_buff)
         strcpy(cmd_buff, "Error: o");
     else if (xflag)
         strcpy(cmd_buff, "Error: x");
+    else
+        return 0;
+    
+    return 1;
+}
+
+void process_result(char *result) {
+    printf("%s\n", result);
+    memset(result, 0, sizeof(*result));
+}
+
+
+int socketConnection() {
+    int sockfd;
+    struct sockaddr_in server;
+
+    if((sockfd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("socket");
+        return -1;
+    }
+
+    bzero((char*)&server, sizeof(server));
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = inet_addr(SERVER_ADDR);
+    server.sin_port = htons(PORT);
+
+    if (connect(sockfd, (struct sockaddr *)&server, sizeof(server)) < 0) {
+        perror("connect");
+        close(sockfd);
+        return -1;
+    }
+
+    return sockfd;
 }
