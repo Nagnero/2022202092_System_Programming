@@ -12,13 +12,13 @@
 #include <pwd.h>
 #include <grp.h>
 
-#define MAX_BUFF 10000
-#define RCV_BUFF 10000
-#define SEND_BUFF 10000
+#define MAX_BUFF 100000
+#define RCV_BUFF 100000
+#define SEND_BUFF 100000
 #define SERVER_ADDR "127.0.0.1"
-#define PORT 13428
 
-int socketConnection();
+
+int socketConnection(int port);
 int cmd_process(char* buff, char* result_buff);
 
 //////////////////////////////////////////////////////////////////////
@@ -84,10 +84,10 @@ void print_file_info(struct stat *buf, char *name, char* output) {
 }
 
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     char buff[MAX_BUFF], result_buff[SEND_BUFF];
-    int sockfd = socketConnection();
+    int port = atoi(argv[1]);
+    int sockfd = socketConnection(port);
     int n, clientfd;
     struct sockaddr_in client;
 
@@ -105,7 +105,7 @@ int main(int argc, char **argv)
         /* display client ip and port */
         printf("==========Client info==========\n");
         printf("client IP: %s\n\n", SERVER_ADDR);
-        printf("client port: %d\n", PORT);
+        printf("client port: %s\n", argv[1]);
         printf("===============================\n");
 
         // write(1, "path : ", 7);
@@ -116,14 +116,22 @@ int main(int argc, char **argv)
             printf("%s\n", buff);
             buff[n] = '\0';
 
+            if (strncmp(buff, "Error:", 6) == 0) {
+                close(clientfd);
+                close(sockfd);
+                exit(1);
+            }
+
             if (cmd_process(buff, result_buff) < 0) {
                 write(STDERR_FILENO, "cmd_process() err!!\n", sizeof("cmd_process() err!!\n"));
-                break;
+                write(clientfd, "cmd_process() err!!\n", sizeof("cmd_process() err!!\n"));
+                close(clientfd);
+                close(sockfd);
+                exit(1);
             }
 
             if (strncmp(result_buff, "QUIT", 4) == 0) {
                 write(clientfd, result_buff, strlen(result_buff));
-                //write(STDOUT_FILENO, "QUIT", sizeof("QUIT"));
                 printf("\n");
                 close(clientfd);
                 close(sockfd);
@@ -146,7 +154,7 @@ int main(int argc, char **argv)
 
 
 
-int socketConnection(){ 
+int socketConnection(int port) {
 ///////////////////////// socket start /////////////////////////
     int sockfd;
     struct sockaddr_in server;
@@ -159,7 +167,7 @@ int socketConnection(){
     bzero((char*)&server, sizeof(server)); // initialize server
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = inet_addr(SERVER_ADDR);
-    server.sin_port = htons(PORT);
+    server.sin_port = htons(port);
 
     if (bind(sockfd, (struct sockaddr *)&server, sizeof(server)) < 0) {
         perror("bind");
@@ -181,7 +189,6 @@ int cmd_process(char* buff, char*result_buff) {
     int argc = 0;
     char* argv[64];
     char* token;
-    char path[1024];
 
     // parse data from client buffer
     token = strtok(buff, " \n");
@@ -210,21 +217,18 @@ int cmd_process(char* buff, char*result_buff) {
         char* temp[64];
         int index = 0;
 
-        // strcat(result_buff, argv[0]);
-
         if (argc == 1) {
-            strcat(result_buff, "\n");
-            // open directory with path
+            // open directory with current path
             dp = opendir(".");
-
-            while ((dirp = readdir(dp)) != NULL) {                
+ 
+            while ((dirp = readdir(dp)) != NULL) {           
                 if (dirp->d_name[0] != '.') {
                     // Build the full path to the file
                     char path[1024];
                     snprintf(path, sizeof(path), "./%s", dirp->d_name);
 
                     // Get file status
-                    if (stat(path, &buf) == 0) {
+                    if (lstat(path, &buf) == 0) {
                         // Check if it is a directory
                         if (S_ISDIR(buf.st_mode)) {
                             // Append '/' to directory name
@@ -237,58 +241,48 @@ int cmd_process(char* buff, char*result_buff) {
                     }
                 }
             }
-
-            // Read directories in a loop
-            while ((dirp = readdir(dp)) != NULL) {
-                strcat(result_buff, dirp->d_name); // Print each directories' name
-            }
-
+            
             // sort buffer strings before print
             qsort(temp, index, sizeof(char *), compare_strings);
-            int offset = strlen(result_buff);
             for (int i = 0; i < index; i++) {
-                offset += snprintf(result_buff + offset, sizeof(result_buff) - offset, "%-25s", temp[i]);
-                if ((i + 1) % 4 == 0) { // After printing 5 names, print a newline
-                    offset += snprintf(result_buff + offset, sizeof(result_buff) - offset, "\n");
-                }
+                strcat(result_buff, temp[i]);
+                strcat(result_buff, "\n");
             }
         }
         else if (strcmp(argv[1], "-a") == 0) {
-            // strcat(result_buff, " -a\n");
-
             // open directory with path
-            if (argc == 3) 
+            if (argc == 3) {
                 dp = opendir(argv[2]);
+            }
             else
                 dp = opendir(".");
 
             // Error handling for opendir
             if (dp == NULL) {
-                // Specific error handling
-                switch (errno) {
-                    case ENOENT:
-                        strcat(result_buff, "Error: no such file or directory\n");
-                        break;
-                    case EACCES:
-                        strcat(result_buff, "Error: cannot access\n");
-                        break;
-                    default:
-                        strcat(result_buff, "Error: no such file or directory\n");
+                if (errno == ENOTDIR) {
+                    strcat(result_buff, argv[2]);
+                    strcat(result_buff, "\n");
+                    return 0;
                 }
-                return -1;
+                else {
+                    return -1;
+                }
             }
-            
-            if (dp != NULL) {
+            else {
                 while ((dirp = readdir(dp)) != NULL) {                
                     // Build the full path to the file
                     char path[1024];
-                    if (argc == 3)
-                        snprintf(path, sizeof(path), "./%s/%s", argv[2], dirp->d_name);
+                    if (argc == 3) {
+                        if (strncmp(argv[2], "/home", 5) == 0)
+                            strcpy(path, argv[2]);
+                        else
+                            snprintf(path, sizeof(path), "./%s/%s", argv[2], dirp->d_name);
+                    }
                     else
                         snprintf(path, sizeof(path), "./%s", dirp->d_name);
 
                     // Get file status
-                    if (stat(path, &buf) == 0) {
+                    if (lstat(path, &buf) == 0) {
                         // Check if it is a directory
                         if (S_ISDIR(buf.st_mode)) {
                             // Append '/' to directory name
@@ -303,115 +297,139 @@ int cmd_process(char* buff, char*result_buff) {
 
                 // sort buffer strings before print
                 qsort(temp, index, sizeof(char *), compare_strings);
-                int offset = strlen(result_buff);
                 for (int i = 0; i < index; i++) {
-                    offset += snprintf(result_buff + offset, sizeof(result_buff) - offset, "%-25s", temp[i]);
-                    if ((i + 1) % 4 == 0) { // After printing 5 names, print a newline
-                        offset += snprintf(result_buff + offset, sizeof(result_buff) - offset, "\n");
-                    }
+                    strcat(result_buff, temp[i]);
+                    strcat(result_buff, "\n");
                 }
             }
         }
         else if (strcmp(argv[1], "-l") == 0) {
-            // strcat(result_buff, " -l\n");
-
+            char temp_path[1024];
+            int ab_flag = 0;
             // open directory with path
-            if (argc == 3) 
-                dp = opendir(argv[2]);
+            if (argc == 3) {
+                if (argv[2][0]== '/') {
+                    strcpy(temp_path, argv[2]);
+                    ab_flag = 1;
+                }
+                else
+                    snprintf(temp_path, sizeof(temp_path), "./%s", argv[2]);
+            }
             else
-                dp = opendir(".");
+                strcpy(temp_path, ".");
+
+            dp = opendir(temp_path);
 
             // Error handling for opendir
             if (dp == NULL) {
                 // Specific error handling
-                switch (errno) {
-                    case ENOENT:
-                        strcat(result_buff, "Error: no such file or directory\n");
-                        break;
-                    case EACCES:
-                        strcat(result_buff, "Error: cannot access\n");
-                        break;
-                    default:
-                        strcat(result_buff, "Error: no such file or directory\n");
+                if (errno == ENOTDIR) {
+                    if (lstat(temp_path, &buf) == 0) {
+                        print_file_info(&buf, argv[2], result_buff);
+                    }
+                    return 0;
                 }
-                return -1;
+                else {
+                    return -1;
+                }
             }
-
-            if (dp != NULL) {
+            else {
                 while ((dirp = readdir(dp)) != NULL) {                
                     // Build the full path to the file
                     char path[1024];
-                    if (argc != 3)
-                        snprintf(path, sizeof(path), "./%s", dirp->d_name);
+                    if (argc == 3) {
+                        if (ab_flag) 
+                            snprintf(path, sizeof(path), "%s/%s", argv[2], dirp->d_name);
+                        else
+                            snprintf(path, sizeof(path), "./%s/%s", argv[2], dirp->d_name);
+                    }
                     else
-                        snprintf(path, sizeof(path), "./%s/%s", argv[2], dirp->d_name);
-                    
+                        snprintf(path, sizeof(path), "./%s", dirp->d_name);
 
                     // Get file status
-                    if (stat(path, &buf) == 0) {
-                        // Check if it is a directory
-                        if (S_ISDIR(buf.st_mode)) {
-                            // Append '/' to directory name
-                            temp[index] = dirp->d_name;
-                            strcat(temp[index++], "/");
+                    if (lstat(path, &buf) == 0) {
+                        if (dirp->d_name[0] != '.') {
+                            // Check if it is a directory
+                            if (S_ISDIR(buf.st_mode)) {
+                                // Append '/' to directory name
+                                temp[index] = dirp->d_name;
+                                strcat(temp[index++], "/");
+                            }
+                            else {
+                                temp[index++] = dirp->d_name;                        
+                            }
                         }
-                        else {
-                            temp[index++] = dirp->d_name;                        
-                        }
-                    }               
+                    }           
                 }
 
-                // sort buffer strings before print
-                qsort(temp, index, sizeof(char *), compare_strings);
-                
-                for (int i = 0; i < index; i++) {
-                    if (temp[i][0] == '.') continue;
-                    if (argc == 3)
-                        snprintf(path, sizeof(path), "./%s/%s", argv[2], temp[i]);
-                    else
-                        snprintf(path, sizeof(path), "./%s", temp[i]);
-                    if (stat(path, &buf) == 0) {
-                        print_file_info(&buf, temp[i], result_buff);
+                if (index != 0) {
+                    // sort buffer strings before print
+                    qsort(temp, index, sizeof(char *), compare_strings);
+                    char path[1024];
+                    for (int i = 0; i < index; i++) {
+                        if (temp[i][0] == '.') continue;
+                        if (argc == 3) {
+                            if (ab_flag)
+                                snprintf(path, sizeof(path), "%s/%s", argv[2], temp[i]);
+                            else
+                                snprintf(path, sizeof(path), "./%s/%s", argv[2], temp[i]);
+                        }
+                        else
+                            snprintf(path, sizeof(path), "./%s", temp[i]);
+
+                        if (stat(path, &buf) == 0) {
+                            print_file_info(&buf, temp[i], result_buff);
+                        }
                     }
                 }
+                else
+                    strcat(result_buff, "\n");                    
             }
         }
         else if (strcmp(argv[1], "-al") == 0) {
-            // strcat(result_buff, " -al\n");
-
+            char temp_path[1024];
+            int ab_flag = 0;
             // open directory with path
-            if (argc == 3) 
-                dp = opendir(argv[2]);
+            if (argc == 3) {
+                if (argv[2][0]== '/') {
+                    strcpy(temp_path, argv[2]);
+                    ab_flag = 1;
+                }
+                else
+                    snprintf(temp_path, sizeof(temp_path), "./%s", argv[2]);
+            }
             else
-                dp = opendir(".");
+                strcpy(temp_path, ".");
+
+            dp = opendir(temp_path);
 
             // Error handling for opendir
             if (dp == NULL) {
-                // Specific error handling
-                switch (errno) {
-                    case ENOENT:
-                        strcat(result_buff, "Error: no such file or directory\n");
-                        break;
-                    case EACCES:
-                        strcat(result_buff, "Error: cannot access\n");
-                        break;
-                    default:
-                        strcat(result_buff, "Error: no such file or directory\n");
+                if (errno == ENOTDIR) {
+                    if (lstat(temp_path, &buf) == 0) {
+                        print_file_info(&buf, argv[2], result_buff);
+                    }
+                    return 0;
                 }
-                return -1;
+                else {
+                    return -1;
+                }
             }
-
-            if (dp != NULL) {
+            else {
                 while ((dirp = readdir(dp)) != NULL) {                
                     // Build the full path to the file
                     char path[1024];
-                    if (argc == 3)
-                        snprintf(path, sizeof(path), "./%s/%s", argv[2], dirp->d_name);
+                    if (argc == 3) {
+                        if (ab_flag) 
+                            snprintf(path, sizeof(path), "%s/%s", argv[2], dirp->d_name);
+                        else
+                            snprintf(path, sizeof(path), "./%s/%s", argv[2], dirp->d_name);
+                    }
                     else
                         snprintf(path, sizeof(path), "./%s", dirp->d_name);
-                    
+
                     // Get file status
-                    if (stat(path, &buf) == 0) {
+                    if (lstat(path, &buf) == 0) {
                         // Check if it is a directory
                         if (S_ISDIR(buf.st_mode)) {
                             // Append '/' to directory name
@@ -426,13 +444,18 @@ int cmd_process(char* buff, char*result_buff) {
 
                 // sort buffer strings before print
                 qsort(temp, index, sizeof(char *), compare_strings);
-                
+                char path[1024];
                 for (int i = 0; i < index; i++) {
-                    if (argc == 3)
-                        snprintf(path, sizeof(path), "./%s/%s", argv[2], temp[i]);
+                    if (argc == 3) {
+                        if (ab_flag)
+                            snprintf(path, sizeof(path), "%s/%s", argv[2], temp[i]);
+                        else
+                            snprintf(path, sizeof(path), "./%s/%s", argv[2], temp[i]);
+                    }
                     else
                         snprintf(path, sizeof(path), "./%s", temp[i]);
-                    if (stat(path, &buf) == 0) {
+
+                    if (lstat(path, &buf) == 0) {
                         print_file_info(&buf, temp[i], result_buff);
                     }
                 }
@@ -440,60 +463,57 @@ int cmd_process(char* buff, char*result_buff) {
         }
         // given path without option
         else {
-            // strcat(result_buff, "\n");
-
             // open directory with path
             dp = opendir(argv[1]);
 
             // Error handling for opendir
             if (dp == NULL) {
-                // Specific error handling
-                switch (errno) {
-                    case ENOENT:
-                        strcat(result_buff, "Error: no such file or directory\n");
-                        break;
-                    case EACCES:
-                        strcat(result_buff, "Error: cannot access\n");
-                        break;
-                    default:
-                        strcat(result_buff, "Error: no such file or directory\n");
+                if (errno == ENOTDIR) {
+                    strcat(result_buff, argv[1]);
+                    strcat(result_buff, "\n");
+                    return 0;
                 }
-                return -1;
+                else {
+                    return -1;
+                }
             }
-            
-            if (dp != NULL) {
+            else {
                 while ((dirp = readdir(dp)) != NULL) {                
                     // Build the full path to the file
                     char path[1024];
-                    snprintf(path, sizeof(path), "./%s/%s", argv[1], dirp->d_name);
-
+                    if (strncmp(argv[1], "/home", 5) == 0)
+                        strcpy(path, argv[1]);
+                    else
+                        snprintf(path, sizeof(path), "./%s/%s", argv[1], dirp->d_name);
                     // Get file status
-                    if (stat(path, &buf) == 0) {
-                        // Check if it is a directory
-                        if (S_ISDIR(buf.st_mode)) {
-                            // Append '/' to directory name
-                            temp[index] = dirp->d_name;
-                            strcat(temp[index++], "/");
-                        }
-                        else {
-                            temp[index++] = dirp->d_name;                        
+                    if (lstat(path, &buf) == 0) {
+                        if (dirp->d_name[0] != '.') {
+                            // Check if it is a directory
+                            if (S_ISDIR(buf.st_mode)) {
+                                // Append '/' to directory name
+                                temp[index] = dirp->d_name;
+                                strcat(temp[index++], "/");
+                            }
+                            else {
+                                temp[index++] = dirp->d_name;                        
+                            }
                         }
                     }               
                 }
 
-                // sort buffer strings before print
-                qsort(temp, index, sizeof(char *), compare_strings);
-                int offset = strlen(result_buff);
-                for (int i = 0; i < index; i++) {
-                    offset += snprintf(result_buff + offset, sizeof(result_buff) - offset, "%-25s", temp[i]);
-                    if ((i + 1) % 4 == 0) { // After printing 5 names, print a newline
-                        offset += snprintf(result_buff + offset, sizeof(result_buff) - offset, "\n");
+                if(index != 0) {
+                    // sort buffer strings before print
+                    qsort(temp, index, sizeof(char *), compare_strings);
+                    for (int i = 0; i < index; i++) {
+                        strcat(result_buff, temp[i]);
+                        strcat(result_buff, "\n");
                     }
                 }
+                else
+                    strcat(result_buff, "\n");
             }
         }
 
-        strcat(result_buff, "\n");
         if (dp != NULL)
             closedir(dp); // Close the directory stream
         

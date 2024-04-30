@@ -10,12 +10,10 @@
 #include <bits/getopt_core.h>
 #include <arpa/inet.h>
 
-#define MAX_BUFF 10000
-#define RCV_BUFF 10000
-#define SERVER_ADDR "127.0.0.1"
-#define PORT 13428
+#define MAX_BUFF 100000
+#define RCV_BUFF 100000
 
-int socketConnection();
+int socketConnection(char* server_addr, int port);
 int conv_cmd(char *buff, char *cmd_buff);
 
 void process_result(char *result);
@@ -23,7 +21,7 @@ void process_result(char *result);
 int main(int argc, char** argv) {
     char buff[MAX_BUFF], cmd_buff[MAX_BUFF], rcv_buff[RCV_BUFF];
     int n;
-    int sockfd = socketConnection(); // get connection and save socket number
+    int sockfd = socketConnection(argv[1], atoi(argv[2])); // get connection and save socket number
 
     while(sockfd != -1) {
         memset(buff, 0, sizeof(buff)); // initialize buffer
@@ -37,6 +35,7 @@ int main(int argc, char** argv) {
         /* convert ls (including options) to NLST (including options) */
         if (conv_cmd(buff, cmd_buff) != 0) {
             write(STDERR_FILENO, "conv_cmd() error!!\n", strlen("conv_cmd() error!!\n"));
+            write(sockfd, cmd_buff, strlen(cmd_buff));
             close(sockfd);
             exit(1);
         }
@@ -56,6 +55,12 @@ int main(int argc, char** argv) {
 
         if (strncmp(rcv_buff, "QUIT", 4) == 0) {
             write(STDOUT_FILENO, "Program quit!!\n", strlen("Program quit!!\n"));
+            close(sockfd);
+            exit(1);
+        }
+        if (strncmp(rcv_buff, "cmd_process() err!!\n", sizeof("cmd_process() err!!\n")) == 0) {
+            write(STDERR_FILENO, "conv_cmd() error!!\n", strlen("conv_cmd() error!!\n"));
+            write(sockfd, cmd_buff, strlen(cmd_buff));
             close(sockfd);
             exit(1);
         }
@@ -166,7 +171,7 @@ void process_result(char *result) {
 }
 
 
-int socketConnection() {
+int socketConnection(char* server_addr, int port) {
     int sockfd;
     struct sockaddr_in server;
 
@@ -177,8 +182,8 @@ int socketConnection() {
 
     bzero((char*)&server, sizeof(server));
     server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr(SERVER_ADDR);
-    server.sin_port = htons(PORT);
+    server.sin_addr.s_addr = inet_addr(server_addr);
+    server.sin_port = htons(port);
 
     if (connect(sockfd, (struct sockaddr *)&server, sizeof(server)) < 0) {
         perror("connect");
