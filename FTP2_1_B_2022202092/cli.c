@@ -1,3 +1,17 @@
+//////////////////////////////////////////////////////////////////////
+// File Name : cli.c                                                //
+// Date : 2024/05/01                                                //
+// OS : Ubuntu 20.04.6 LTS 64bits                                   //
+//                                                                  //
+// Author : Sunwoo Yeon                                             //
+// Student ID : 2022202092                                          //
+// -----------------------------------------------------------------//
+// Title : System Programming Assignment #2-1 ( ftp server )        //
+// Description : The program work as Linux terminal commands ls,    /
+//              quit command. This file work for getting user input //
+//              and transfer it to FTP commands and send to server  //
+//              to execute appropriate work                         //
+//////////////////////////////////////////////////////////////////////
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,14 +24,27 @@
 #include <bits/getopt_core.h>
 #include <arpa/inet.h>
 
-#define MAX_BUFF 100000
-#define RCV_BUFF 100000
+#define MAX_BUFF 1000000
+#define RCV_BUFF 1000000
 
 int socketConnection(char* server_addr, int port);
+void parse_options(int argc, char *argv[], int *aflag, int *lflag, int *oflag);
 int conv_cmd(char *buff, char *cmd_buff);
-
 void process_result(char *result);
 
+//////////////////////////////////////////////////////////////////////
+// main                                                             //
+// =================================================================//
+// Input: argc -> Number of command-line arguments                  //
+//        argv -> Array of command-line arguments                   //
+//                                                                  //
+// Output: int - Status code (0 for success, non-zero for failure)  //
+//                                                                  //
+// Purpose: Initializes a network connection, processes user input, //
+//          sends commands to the server, and handles server        //
+//          responses. This loop continues until an error occurs or //
+//          the "QUIT" command is received from the server.         //
+//////////////////////////////////////////////////////////////////////
 int main(int argc, char** argv) {
     char buff[MAX_BUFF], cmd_buff[MAX_BUFF], rcv_buff[RCV_BUFF];
     int n;
@@ -58,12 +85,43 @@ int main(int argc, char** argv) {
             close(sockfd);
             exit(1);
         }
+
         if (strncmp(rcv_buff, "cmd_process() err!!\n", sizeof("cmd_process() err!!\n")) == 0) {
-            write(STDERR_FILENO, "conv_cmd() error!!\n", strlen("conv_cmd() error!!\n"));
-            write(sockfd, cmd_buff, strlen(cmd_buff));
+            write(STDOUT_FILENO, rcv_buff, strlen(rcv_buff));
             close(sockfd);
             exit(1);
         }
+        else if (strncmp(rcv_buff, "Error: unknown command\n\n", sizeof("Error: unknown command\n\n")) == 0) {
+            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
+            close(sockfd);
+            exit(1);
+        }
+        else if (strncmp(rcv_buff, "Error: arguments is not required\n\n", sizeof("Error: arguments is not required\n\n")) == 0) {
+            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
+            close(sockfd);
+            exit(1);
+        }
+        else if (strncmp(rcv_buff, "Error: invalid option\n\n", sizeof("Error: invalid option\n\n")) == 0) {
+            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
+            close(sockfd);
+            exit(1);
+        }
+        else if (strncmp(rcv_buff, "Error: too many argument\n\n", sizeof("Error: too many argument\n\n")) == 0) {
+            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
+            close(sockfd);
+            exit(1);
+        }
+        else if (strncmp(rcv_buff, "Error: no such file exist\n\n", sizeof("Error: no such file exist\n\n")) == 0) {
+            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
+            close(sockfd);
+            exit(1);
+        }
+        else if (strncmp(rcv_buff, "Error: Permission denied\n\n", sizeof("Error: Permission denied\n\n")) == 0) {
+            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
+            close(sockfd);
+            exit(1);
+        }
+        
 
         /*display ls(including options) command result */
         process_result(rcv_buff);
@@ -76,8 +134,62 @@ int main(int argc, char** argv) {
     return 0;
 }
 
-void parse_options(int argc, char *argv[], int *aflag, int *lflag, int *oflag) {
+//////////////////////////////////////////////////////////////////////
+// socketConnection                                                 //
+// =================================================================//
+// Input: server_addr -> pointer to a string representing the       //
+//        server's IP address                                       //
+//        port -> integer representing the server's port number     //
+//                                                                  //
+// Output: int - A file descriptor for the socket on success;       //
+//               -1 on failure                                      //
+//                                                                  //
+// Purpose: Establish connection to a specified server address      //
+//          and port. This function creates a socket, sets up the   //
+//          server address structure, and attempts a connection.    //
+//          If any step fails, it returns -1 and closes the socket  //
+//          if it was opened.                                       //
+//////////////////////////////////////////////////////////////////////
+int socketConnection(char* server_addr, int port) {
+    int sockfd;
+    struct sockaddr_in server;
 
+    if((sockfd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("socket");
+        return -1;
+    }
+
+    bzero((char*)&server, sizeof(server));
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = inet_addr(server_addr);
+    server.sin_port = htons(port);
+
+    if (connect(sockfd, (struct sockaddr *)&server, sizeof(server)) < 0) {
+        perror("connect");
+        close(sockfd);
+        return -1;
+    }
+
+    return sockfd;
+}
+
+
+//////////////////////////////////////////////////////////////////////
+// parse_options                                                    //
+// =================================================================//
+// Input: argc -> Number of command-line arguments                  //
+//        argv -> Array of command-line arguments                   //
+//        aflag -> Pointer to the flag for 'a' option               //
+//        lflag -> Pointer to the flag for 'l' option               //
+//        oflag -> Pointer to the flag for other unrecognized options //
+//                                                                  //
+// Output: None (void function)                                     //
+//                                                                  //
+// Purpose: Parses command-line options and sets flags for handling //
+//          specific command options like 'a' and 'l'. Unrecognized //
+//          options set an error flag.                              //
+//////////////////////////////////////////////////////////////////////
+void parse_options(int argc, char *argv[], int *aflag, int *lflag, int *oflag) {
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == '-') { // check if it is option
             for (int j = 1; argv[i][j] != '\0'; j++) {
@@ -97,6 +209,25 @@ void parse_options(int argc, char *argv[], int *aflag, int *lflag, int *oflag) {
     }
 }
 
+//////////////////////////////////////////////////////////////////////
+// conv_cmd                                                         //
+// =================================================================//
+// Input: buff -> pointer to the input buffer containing the user's //
+//                command line input                                //
+//        cmd_buff -> pointer to the buffer where the converted     //
+//                    command will be stored                        //
+//                                                                  //
+// Output: int - Returns 0 if successful, error flags are handled   //
+//               internally and affect command behavior             //
+//                                                                  //
+// Purpose: Converts user commands into server-compatible commands.//
+//          This includes converting 'ls' commands to 'NLST' and    //
+//          handling various flags such as '-a' and '-l'. It parses //
+//          the command and options, and builds a new command       //
+//          string based on the input. Errors in options or command //
+//          structure set specific flags that modify the final      //
+//          command or trigger error messages.                      //
+/////////////////////////////////////////////////////////////////////
 int conv_cmd(char *buff, char *cmd_buff) {
     int aflag = 0, lflag = 0;            // flag for option management
     int oflag = 0, xflag = 0, qflag = 0; // flag for error management
@@ -111,6 +242,8 @@ int conv_cmd(char *buff, char *cmd_buff) {
         token = strtok(NULL, " \n"); // Continue tokenizing the string
     }
     argv[argc] = NULL;
+    for (int i = 0; i > argc; i++)
+        strcat("%s\n", argv[i]);
 
     // If first argument is "ls"
     if (strcmp(argv[0], "ls") == 0) {
@@ -135,6 +268,10 @@ int conv_cmd(char *buff, char *cmd_buff) {
                 if (strcmp(argv[argc - 2], "ls") != 0 && argv[argc - 2][0] != '-')
                     xflag = 1; // set too many argument error flag
         }
+        else if (strcmp(temp, "ls") == 0 && argc > 1) {
+            strcat(cmd_buff, " ");
+            strcat(cmd_buff, temp);
+        }
             
         
     }
@@ -148,8 +285,6 @@ int conv_cmd(char *buff, char *cmd_buff) {
     // Unknown command
     else {
         strcpy(cmd_buff, "Error: !");
-        write(STDOUT_FILENO, cmd_buff, 1024);
-        return 1;
     }
 
     // process error flag
@@ -159,37 +294,21 @@ int conv_cmd(char *buff, char *cmd_buff) {
         strcpy(cmd_buff, "Error: o");
     else if (xflag)
         strcpy(cmd_buff, "Error: x");
-    else
-        return 0;
-    
-    return 1;
+
+    return 0;
 }
 
+//////////////////////////////////////////////////////////////////////
+// process_result                                                   //
+// =================================================================//
+// Input: result -> pointer to the result string to be displayed    //
+//                                                                  //
+// Output: None (void function)                                     //
+//                                                                  //
+// Purpose: Display the result string and clear its content.        //
+//////////////////////////////////////////////////////////////////////
 void process_result(char *result) {
     printf("%s\n", result);
     memset(result, 0, sizeof(*result));
 }
 
-
-int socketConnection(char* server_addr, int port) {
-    int sockfd;
-    struct sockaddr_in server;
-
-    if((sockfd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("socket");
-        return -1;
-    }
-
-    bzero((char*)&server, sizeof(server));
-    server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr(server_addr);
-    server.sin_port = htons(port);
-
-    if (connect(sockfd, (struct sockaddr *)&server, sizeof(server)) < 0) {
-        perror("connect");
-        close(sockfd);
-        return -1;
-    }
-
-    return sockfd;
-}
