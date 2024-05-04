@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "string.h": "c",
+        "stat.h": "c",
+        "getopt_core.h": "c",
+        "wait.h": "c",
+        "socket.h": "c",
+        "types.h": "c"
+    }
+}
