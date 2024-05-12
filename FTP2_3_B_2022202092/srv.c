@@ -19,23 +19,104 @@
 
 void sh_chld(int); // signal handler for SIGCHLD 
 void sh_alrm(int); // signal handler for SIGALRM
+void sh_int(int signo); // signal handler for SIGINT
 int cmd_process(char* buff, char* result_buff);
 int compare_strings(const void *a, const void *b);
 void print_file_info(struct stat *buf, char *name, char* output);
 
+// Define the pid_port structure
+struct pid_port {
+    pid_t pid;
+    int port;
+    int client_fd; 
+    time_t start_time;
+};
+
+// Define the node structure for the linked list
+struct node {
+    struct pid_port data;
+    struct node* next;
+};
+
+// Function to create a new node
+struct node* create_node(pid_t pid, int port, int client_fd) {
+    struct node* new_node = (struct node*)malloc(sizeof(struct node));
+    if (!new_node) {
+        perror("Failed to allocate memory for new node");
+        exit(1);
+    }
+
+    new_node->data.pid = pid;
+    new_node->data.port = port;
+    new_node->data.client_fd = client_fd; // client_fd 저장
+    new_node->data.start_time = time(NULL);
+    new_node->next = NULL;
+
+    return new_node;
+}
+
+// Function to add a node to the end of the list
+void add_node(struct node** head, pid_t pid, int port, int client_fd) {
+    struct node* newNode = create_node(pid, port, client_fd);
+    if (*head == NULL) {
+        // If the list is empty, make the new node the head
+        *head = newNode;
+    } else {
+        // Otherwise, find the last node and append the new node
+        struct node* curNode = *head;
+        while (curNode->next != NULL) {
+            curNode = curNode->next;
+        }
+        curNode->next = newNode;
+    }
+}
+
+void remove_node(struct node **head, pid_t pid) {
+    struct node *temp = *head, *prev = NULL;
+    while (temp != NULL && temp->data.pid != pid) {
+        prev = temp;
+        temp = temp->next;
+    }
+    if (temp == NULL) return;
+    if (prev == NULL) {
+        *head = temp->next;
+    } else {
+        prev->next = temp->next;
+    }
+    free(temp);
+}
+
+struct node* head = NULL;
+int child_cnt;
+int server_fd, client_fd;
+int exiting = 0;
+
 int main(int argc, char **argv) {
+    child_cnt = 0;
     char buff[BUF_SIZE], result_buff[BUF_SIZE];
     int n;
     struct sockaddr_in server_addr, client_addr; 
-    int server_fd, client_fd;
     socklen_t len;
 
-    /* Applying signal handler(sh_alrm) for SIGALRM */
-    signal(SIGALRM, sh_alrm);
-    /* Applying signal handler(sh_chld) for SIGCHLD */
-    signal(SIGCHLD, sh_chld);
+    // Set up signal handlers
+    if (signal(SIGCHLD, sh_chld) == SIG_ERR) {
+        perror("Cannot handle SIGCHLD");
+        exit(1);
+    }
+    if (signal(SIGALRM, sh_alrm) == SIG_ERR) {
+        perror("Cannot handle SIGALRM");
+        exit(1);
+    }
+    if (signal(SIGINT, sh_int) == SIG_ERR) {
+        perror("Cannot handle SIGINT");
+        exit(1);
+    }
 
-    server_fd = socket (PF_INET, SOCK_STREAM, 0);
+    server_fd = socket(PF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1) {
+        perror("socket create fail");
+        exit(1);
+    }
 
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
@@ -46,15 +127,17 @@ int main(int argc, char **argv) {
 
     listen(server_fd, 5);
 
-    while(1) {
+    while(1) {        
         pid_t pid;
         len = sizeof(client_addr);
         client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &len);
+
 
         if ((pid = fork()) < 0) {
             printf("fork err");
         }
         else if (pid == 0) { // child process
+            close(server_fd);
             if(client_fd < 0) {
                 write(STDERR_FILENO, "client_info() err!!\n", sizeof("client_info() err!!\n"));
                 close(client_fd);
@@ -70,22 +153,22 @@ int main(int argc, char **argv) {
                     }
                 }
 
-                char output[100];
+                char output[128];
                 strcpy(output, buff);
-                strcat(output, "\t");
+                //char temp[128];
 
+                snprintf(output, sizeof(output), "%-20.20s\t[%d]\n", buff, getpid());
+                //snprintf(temp, sizeof(temp), "\t[%d]\n", getpid());
+                // strcat(output, temp);
+                write(STDERR_FILENO, output, sizeof(output));
+                
                 if (cmd_process(buff, result_buff) < 0) {
                     write(STDERR_FILENO, "cmd_process() err!!\n", sizeof("cmd_process() err!!\n"));
-                    // write(STDERR_FILENO, result_buff, strlen(result_buff));
-                    // write(client_fd, result_buff, strlen(result_buff));
-                    // memset(result_buff, 0, sizeof(result_buff));
-                    // memset(buff, 0, sizeof(buff));
-                    // continue;
                 }
 
                 if (strcmp(result_buff, "QUIT\n") == 0) {
                     write(client_fd, result_buff, strlen(result_buff));
-                    alarm(1);
+                    printf("Client(%d)'s Release\n\n", getpid());
                     break;
                 }
                 else {
@@ -93,12 +176,14 @@ int main(int argc, char **argv) {
                     memset(buff, 0, sizeof(buff));
                     memset(result_buff, 0, sizeof(result_buff));
                 }
-                
-                //write(client_fd, buff, BUF_SIZE);
             }
+
+            close(client_fd);
+            exit(0);
         }
-        else { 
-            char output[BUF_SIZE] = {};
+        else { // parent
+            add_node(&head, pid, ntohs(client_addr.sin_port), client_fd);
+            char parent_output[BUF_SIZE] = {};
             /* display client ip and port */
             char temp_output[1000];
             snprintf(temp_output, sizeof(temp_output), 
@@ -108,23 +193,96 @@ int main(int argc, char **argv) {
                     "===============================\n",
                     inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
             write(STDOUT_FILENO, temp_output, strlen(temp_output));
-            sprintf(output,  "Child Process ID : %d\n", pid);
-            write(STDOUT_FILENO, output, BUF_SIZE);
+            sprintf(parent_output,  "Child Process ID : %d\n", pid);
+            write(STDOUT_FILENO, parent_output, strlen(parent_output));
+            memset(temp_output, 0, sizeof(temp_output));
+            alarm(1);
         }
 
+        child_cnt++;
         close(client_fd);
     }
     return 0;
 }
 
 void sh_chld(int signum) {
-    printf("Status of Child process was changed.\n"); 
-    wait(NULL);
+    usleep(600); // delay for server closing
+    if (exiting) return; // ignore process terminated by SIGTERM or during exiting
+    pid_t pid;
+    int status;
+
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        child_cnt--;
+        remove_node(&head, pid);
+    }
+    char cur_state[BUF_SIZE];
+    snprintf(cur_state, sizeof(cur_state), "Current Number of Clients: %d\n", child_cnt);
+
+    if (child_cnt > 0) {
+        strcat(cur_state, "     PID    PORT    TIME\n");
+
+        struct node* curNode = head;
+        while (curNode) {
+            time_t current_time = time(NULL);
+            int elapsed_time = difftime(current_time, curNode->data.start_time);  // Calculate elapsed time
+            char t[128];
+            snprintf(t, sizeof(t), "%8d%8d%8d\n", curNode->data.pid, curNode->data.port, elapsed_time);
+            strncat(cur_state, t, BUF_SIZE - strlen(cur_state) - 1);
+            curNode = curNode->next;
+        }
+        strcat(cur_state, "\n");
+    }
+
+    write(STDOUT_FILENO, cur_state, strlen(cur_state));
 }
 
 void sh_alrm(int signum) {
-    printf("Child Process (PID : %d) will be terminated.\n", getpid()); 
-    exit(1);
+    alarm(10);
+    if (child_cnt != 0) {
+        char cur_state[BUF_SIZE];
+        snprintf(cur_state, sizeof(cur_state), "Current Number of Clients: %d\n", child_cnt);
+
+        if (child_cnt > 0) {
+            strcat(cur_state, "     PID    PORT    TIME\n");
+
+            struct node* curNode = head;
+            while (curNode) {
+                time_t current_time = time(NULL);
+                int elapsed_time = difftime(current_time, curNode->data.start_time);  // Calculate elapsed time
+                char t[128];
+                snprintf(t, sizeof(t), "%8d%8d%8d\n", curNode->data.pid, curNode->data.port, elapsed_time);
+                strncat(cur_state, t, BUF_SIZE - strlen(cur_state) - 1);
+                curNode = curNode->next;
+            }
+            strcat(cur_state, "\n");
+        }
+
+        write(STDOUT_FILENO, cur_state, strlen(cur_state));
+    }
+}
+
+void sh_int(int signo) {
+    // Terminate all child processes
+    struct node* current = head;
+    exiting = 1; // Set exiting flag to prevent sh_chld from processing
+
+    while (current != NULL) {
+        close(current->data.client_fd);
+        if (kill(current->data.pid, SIGTERM) == -1) {
+            perror("kill error");
+        }
+        if (kill(current->data.pid - 1, SIGTERM) == -1) {
+            perror("client kill error");
+        }
+        current = current->next;
+    }
+
+    // Wait for all child processes to exit
+    int status;
+    while (waitpid(-1, &status, 0) > 0);
+
+    // Exit the program
+    exit(0);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -210,10 +368,20 @@ int cmd_process(char* buff, char* result_buff) {
             if (index != 0) {
                 // sort buffer strings before print
                 qsort(temp, index, sizeof(char *), compare_strings);
+                
                 for (int i = 0; i < index; i++) {
+                    // Print each string with a fixed width of 25 characters
                     strcat(result_buff, temp[i]);
-                    strcat(result_buff, "\n");
+                    strcat(result_buff, " \t");
+
+                    // After printing 4 names, print a newline
+                    if ((i + 1) % 4 == 0) 
+                        strcat(result_buff, "\n");                    
                 }
+
+                // Add a final newline if the last line didn't end with one
+                if (index % 4 != 0) 
+                    strcat(result_buff, "\n");
             }
             else
                 strcpy(result_buff, "\n");
@@ -281,10 +449,20 @@ int cmd_process(char* buff, char* result_buff) {
 
                 // sort buffer strings before print
                 qsort(temp, index, sizeof(char *), compare_strings);
+                
                 for (int i = 0; i < index; i++) {
+                    // Print each string with a fixed width of 25 characters
                     strcat(result_buff, temp[i]);
-                    strcat(result_buff, "\n");
+                    strcat(result_buff, " \t");
+
+                    // After printing 4 names, print a newline
+                    if ((i + 1) % 4 == 0) 
+                        strcat(result_buff, "\n");                    
                 }
+
+                // Add a final newline if the last line didn't end with one
+                if (index % 4 != 0) 
+                    strcat(result_buff, "\n");
             }
         }
         else if (strcmp(argv[1], "-l") == 0) {

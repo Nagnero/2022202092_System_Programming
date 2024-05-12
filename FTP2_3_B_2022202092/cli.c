@@ -1,3 +1,17 @@
+//////////////////////////////////////////////////////////////////////
+// File Name : cli.c                                                //
+// Date : 2024/05/12                                                //
+// OS : Ubuntu 20.04.6 LTS 64bits                                   //
+//                                                                  //
+// Author : Sunwoo Yeon                                             //
+// Student ID : 2022202092                                          //
+// -----------------------------------------------------------------//
+// Title : System Programming Assignment #2-3 ( ftp server )        //
+// Description : The program work as Linux terminal commands ls, dir//
+//              pwd, cd, mkdir, delete, rmdir, rename, quit command.//
+//              This file work for client command parsing and       //
+//              change to FTP command and pass it to server file    //
+//////////////////////////////////////////////////////////////////////
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -12,13 +26,44 @@
 
 #define BUF_SIZE 100000
 
+void sh_chld(int); // signal handler for SIGCHLD 
+void sh_alrm(int); // signal handler for SIGALRM
+void sh_int(int signo); // signal handler for SIGINT
 void parse_options(int argc, char *argv[], int *aflag, int *lflag, int *oflag);
 int conv_cmd(char *buff, char *cmd_buff);
 
+int sockfd;
+
+//////////////////////////////////////////////////////////////////////
+// main                                                             //
+// =================================================================//
+// Input: argc -> Number of command line arguments                  //
+//        argv -> Array of command line argument strings            //
+//                                                                  //
+// Output: int - Returns 0 for normal termination                   //
+//               Returns 1 for error termination                    //
+//                                                                  //
+// Purpose: Connect to a server, send commands received from the    //
+//          user, and handle server responses. Manages signal       //
+//          handlers for process control and graceful termination.  //
+//////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv) {
     char buff[BUF_SIZE], cmd_buff[BUF_SIZE], rcv_buff[BUF_SIZE];
-    int sockfd;
     struct sockaddr_in serv_addr;
+
+    // Set up signal handlers
+    if (signal(SIGCHLD, sh_chld) == SIG_ERR) {
+        perror("Cannot handle SIGCHLD");
+        exit(1);
+    }
+    if (signal(SIGALRM, sh_alrm) == SIG_ERR) {
+        perror("Cannot handle SIGALRM");
+        exit(1);
+    }
+    if (signal(SIGINT, sh_int) == SIG_ERR) {
+        perror("Cannot handle SIGINT");
+        exit(1);
+    }
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -27,7 +72,10 @@ int main(int argc, char **argv) {
     serv_addr.sin_addr.s_addr = inet_addr(argv[1]);
     serv_addr.sin_port = htons(atoi(argv[2]));
 
-    connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+    if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("Connection failed");
+        exit(1);
+    }
 
     while (1) {
         write(STDOUT_FILENO, ">", 2);
@@ -59,46 +107,9 @@ int main(int argc, char **argv) {
         if (strncmp(rcv_buff, "QUIT", 4) == 0) {
             write(STDOUT_FILENO, "Program quit!!\n", strlen("Program quit!!\n"));
             close(sockfd);
-            break;
+            exit(0);
         }
 
-        if (strncmp(rcv_buff, "cmd_process() err!!\n", sizeof("cmd_process() err!!\n")) == 0) {
-            write(STDOUT_FILENO, rcv_buff, strlen(rcv_buff));
-            close(sockfd);
-            exit(1);
-        }
-        else if (strncmp(rcv_buff, "Error: unknown command\n\n", sizeof("Error: unknown command\n\n")) == 0) {
-            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
-            close(sockfd);
-            exit(1);
-        }
-        else if (strncmp(rcv_buff, "Error: arguments is not required\n\n", sizeof("Error: arguments is not required\n\n")) == 0) {
-            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
-            close(sockfd);
-            exit(1);
-        }
-        else if (strncmp(rcv_buff, "Error: invalid option\n\n", sizeof("Error: invalid option\n\n")) == 0) {
-            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
-            close(sockfd);
-            exit(1);
-        }
-        else if (strncmp(rcv_buff, "Error: too many argument\n\n", sizeof("Error: too many argument\n\n")) == 0) {
-            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
-            close(sockfd);
-            exit(1);
-        }
-        else if (strncmp(rcv_buff, "Error: no such file exist\n\n", sizeof("Error: no such file exist\n\n")) == 0) {
-            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
-            close(sockfd);
-            exit(1);
-        }
-        else if (strncmp(rcv_buff, "Error: Permission denied\n\n", sizeof("Error: Permission denied\n\n")) == 0) {
-            write(STDERR_FILENO, rcv_buff, strlen(rcv_buff));
-            close(sockfd);
-            exit(1);
-        }
-        
-        /*display ls(including options) command result */
         printf("%s\n", rcv_buff);
         memset(rcv_buff, 0, sizeof(rcv_buff));
     }
@@ -107,6 +118,76 @@ int main(int argc, char **argv) {
     return 0;
 }
 
+
+//////////////////////////////////////////////////////////////////////
+// sh_chld                                                          //
+// =================================================================//
+// Input: signum -> Signal number (SIGCHLD)                         //
+//                                                                  //
+// Output: None                                                     //
+//                                                                  //
+// Purpose: Signal handler for SIGCHLD. Handles termination of child//
+//          processes by printing a status message and reaping the  //
+//          terminated child process using wait().                  //
+//////////////////////////////////////////////////////////////////////
+void sh_chld(int signum) {
+    printf("Status of Child process was changed.\n"); 
+    wait(NULL);
+}
+
+//////////////////////////////////////////////////////////////////////
+// sh_alrm                                                          //
+// =================================================================//
+// Input: signum -> Signal number (SIGALRM)                         //
+//                                                                  //
+// Output: None                                                     //
+//                                                                  //
+// Purpose: Signal handler for SIGALRM. Handles alarm signal by     //
+//          printing a message indicating the child process will    //
+//          be terminated and then exits the process.               //
+//////////////////////////////////////////////////////////////////////
+void sh_alrm(int signum) {
+    printf("Child Process (PID : %d) will be terminated.\n", getpid()); 
+    exit(1);
+}
+
+//////////////////////////////////////////////////////////////////////
+// sh_int                                                           //
+// =================================================================//
+// Input: signo -> Signal number (SIGINT)                           //
+//                                                                  //
+// Output: None                                                     //
+//                                                                  //
+// Purpose: Signal handler for SIGINT. Handles interrupt signal by  //
+//          sending a "QUIT" message to the server and then exits   //
+//          the program gracefully.                                 //
+//////////////////////////////////////////////////////////////////////
+void sh_int(int signo) {
+    // Send the "QUIT" message to the server
+    if (write(sockfd, "QUIT", strlen("QUIT")) < 0) {
+        perror("Failed to send QUIT message");
+    }
+    // Exit the program
+    exit(0);
+}
+
+
+//////////////////////////////////////////////////////////////////////
+// parse_options                                                    //
+// =================================================================//
+// Input: argc -> Number of command line arguments                  //
+//        argv -> Array of command line argument strings            //
+//        aflag -> Pointer to the flag for option 'a'               //
+//        lflag -> Pointer to the flag for option 'l'               //
+//        oflag -> Pointer to the flag for invalid options          //
+//                                                                  //
+// Output: None                                                     //
+//                                                                  //
+// Purpose: Parses command line options and sets corresponding      //
+//          flags based on the options provided. Flags 'a' and 'l'  //
+//          are set if their respective options are found, and      //
+//          oflag is set if an invalid option is encountered.       //
+//////////////////////////////////////////////////////////////////////
 void parse_options(int argc, char *argv[], int *aflag, int *lflag, int *oflag) {
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == '-') { // check if it is option
@@ -160,11 +241,7 @@ int conv_cmd(char *buff, char *cmd_buff) {
         token = strtok(NULL, " \n"); // Continue tokenizing the string
     }
     argv[argc] = NULL;
-
-    // for (int i = 0; i > argc; i++)
-    //     write(STDOUT_FILENO, argv[i], sizeof(argv[i]));
-
-
+    
     // If first argument is "ls"
     if (strcmp(argv[0], "ls") == 0) {
         parse_options(argc, argv, &aflag, &lflag, &oflag);
