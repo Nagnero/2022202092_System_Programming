@@ -1,3 +1,17 @@
+//////////////////////////////////////////////////////////////////////
+// File Name : srv.c                                                //
+// Date : 2024/05/12                                                //
+// OS : Ubuntu 20.04.6 LTS 64bits                                   //
+//                                                                  //
+// Author : Sunwoo Yeon                                             //
+// Student ID : 2022202092                                          //
+// -----------------------------------------------------------------//
+// Title : System Programming Assignment #2-3 ( ftp server )        //
+// Description : The program work as Linux terminal commands ls, dir//
+//              pwd, cd, mkdir, delete, rmdir, rename, quit command.//
+//              This file work for receiving FTP commands from      //
+//              client and execute appropriate work                 //
+//////////////////////////////////////////////////////////////////////
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -91,6 +105,19 @@ int child_cnt;
 int server_fd, client_fd;
 int exiting = 0;
 
+//////////////////////////////////////////////////////////////////////
+// main                                                             //
+// =================================================================//
+// Input: argc -> Number of command line arguments                  //
+//        argv -> Array of command line argument strings            //
+//                                                                  //
+// Output: int - Returns 0 for normal termination                   //
+//               Returns 1 for error termination                    //
+//                                                                  //
+// Purpose: Set up server to accept client connections, fork child  //
+//          processes to handle client requests, and manage signal  //
+//          handling for process control.                           //
+//////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv) {
     child_cnt = 0;
     char buff[BUF_SIZE], result_buff[BUF_SIZE];
@@ -157,19 +184,23 @@ int main(int argc, char **argv) {
                 strcpy(output, buff);
                 //char temp[128];
 
-                snprintf(output, sizeof(output), "%-20.20s\t[%d]\n", buff, getpid());
-                //snprintf(temp, sizeof(temp), "\t[%d]\n", getpid());
-                // strcat(output, temp);
+                snprintf(output, sizeof(output), "%-40.40s\t[%d]\n", buff, getpid());
                 write(STDERR_FILENO, output, sizeof(output));
                 
                 if (cmd_process(buff, result_buff) < 0) {
-                    write(STDERR_FILENO, "cmd_process() err!!\n", sizeof("cmd_process() err!!\n"));
+                    write(STDERR_FILENO, "Error: No such file or directory\n", sizeof("Error: No such file or directory\n"));
                 }
 
                 if (strcmp(result_buff, "QUIT\n") == 0) {
                     write(client_fd, result_buff, strlen(result_buff));
                     printf("Client(%d)'s Release\n\n", getpid());
                     break;
+                }
+                else if (strcmp(result_buff, "Error: No such file or directory\n") == 0) {
+                    write(client_fd, result_buff, strlen(result_buff));
+                    write(STDOUT_FILENO, result_buff, strlen(result_buff));
+                    memset(buff, 0, sizeof(buff));
+                    memset(result_buff, 0, sizeof(result_buff));
                 }
                 else {
                     write(client_fd, result_buff, strlen(result_buff));
@@ -205,6 +236,18 @@ int main(int argc, char **argv) {
     return 0;
 }
 
+//////////////////////////////////////////////////////////////////////
+// sh_chld                                                          //
+// =================================================================//
+// Input: signum -> Signal number (SIGCHLD)                         //
+//                                                                  //
+// Output: None                                                     //
+//                                                                  //
+// Purpose: Signal handler for SIGCHLD. Handles termination of child//
+//          processes, updates child process count, and removes     //
+//          terminated processes from the linked list. It also      //
+//          prints the current state of active child processes.     //
+//////////////////////////////////////////////////////////////////////
 void sh_chld(int signum) {
     usleep(600); // delay for server closing
     if (exiting) return; // ignore process terminated by SIGTERM or during exiting
@@ -236,8 +279,19 @@ void sh_chld(int signum) {
     write(STDOUT_FILENO, cur_state, strlen(cur_state));
 }
 
+//////////////////////////////////////////////////////////////////////
+// sh_alrm                                                          //
+// =================================================================//
+// Input: signum -> Signal number (SIGALRM)                         //
+//                                                                  //
+// Output: None                                                     //
+//                                                                  //
+// Purpose: Signal handler for SIGALRM. Sets the alarm for periodic //
+//          execution, and prints the current state of active child //
+//          processes.                                              //
+//////////////////////////////////////////////////////////////////////
 void sh_alrm(int signum) {
-    alarm(10);
+    //alarm(10);
     if (child_cnt != 0) {
         char cur_state[BUF_SIZE];
         snprintf(cur_state, sizeof(cur_state), "Current Number of Clients: %d\n", child_cnt);
@@ -261,6 +315,17 @@ void sh_alrm(int signum) {
     }
 }
 
+//////////////////////////////////////////////////////////////////////
+// sh_int                                                           //
+// =================================================================//
+// Input: signo -> Signal number (SIGINT)                           //
+//                                                                  //
+// Output: None                                                     //
+//                                                                  //
+// Purpose: Signal handler for SIGINT. Terminates all child         //
+//          processes, waits for them to exit, and exits the program//
+//          gracefully.                                             //
+//////////////////////////////////////////////////////////////////////
 void sh_int(int signo) {
     // Terminate all child processes
     struct node* current = head;
@@ -413,7 +478,7 @@ int cmd_process(char* buff, char* result_buff) {
                 else if (errno == EACCES) 
                     strcat(result_buff, "Error: Permission denied\n\n");
                 else 
-                    strcpy(result_buff, "Error: no such file exist\n\n");
+                    strcpy(result_buff, "Error: No such file or directory\n\n");
                 
                 return -1;
             }
@@ -494,7 +559,7 @@ int cmd_process(char* buff, char* result_buff) {
                 else if (errno == EACCES) 
                     strcat(result_buff, "Error: Permission denied\n\n");
                 else 
-                    strcpy(result_buff, "Error: no such file exist\n\n");
+                    strcpy(result_buff, "Error: No such file or directory\n\n");
                 
                 return -1;
             }
@@ -580,7 +645,7 @@ int cmd_process(char* buff, char* result_buff) {
                 else if (errno == EACCES) 
                     strcat(result_buff, "Error: Permission denied\n\n");
                 else 
-                    strcpy(result_buff, "Error: no such file exist\n\n");
+                    strcpy(result_buff, "Error: No such file or directory\n\n");
                 
                 return -1;
             }
@@ -654,7 +719,7 @@ int cmd_process(char* buff, char* result_buff) {
                 else if (errno == EACCES) 
                     strcat(result_buff, "Error: Permission denied\n\n");
                 else 
-                    strcpy(result_buff, "Error: no such file exist\n\n");
+                    strcpy(result_buff, "Error: No such file or directory\n\n");
                 
                 return -1;
             }
@@ -738,7 +803,7 @@ int cmd_process(char* buff, char* result_buff) {
                 else if (errno == EACCES) 
                     strcat(result_buff, "Error: Permission denied\n\n");
                 else 
-                    strcpy(result_buff, "Error: no such file exist\n\n");
+                    strcpy(result_buff, "Error: No such file or directory\n\n");
                 
                 return -1;
         }
@@ -859,7 +924,7 @@ int cmd_process(char* buff, char* result_buff) {
         // Check if directory exists
         struct stat statbuf;
         if (stat(normalized_path, &statbuf) != 0 || !S_ISDIR(statbuf.st_mode)) {
-            strcpy(result_buff, "Error: directory not found\n");
+            strcpy(result_buff, "Error: No such file or directory\n");
         } else {
             // Change directory
             if (chdir(normalized_path) == -1) {
@@ -899,7 +964,7 @@ int cmd_process(char* buff, char* result_buff) {
         // Check if directory exists
         struct stat statbuf;
         if (stat(parent_path, &statbuf) != 0 || !S_ISDIR(statbuf.st_mode)) {
-            strcpy(result_buff, "Error: directory not found\n");
+            strcpy(result_buff, "Error: No such file or directory\n");
         } else {
             // Change directory
             if (chdir(parent_path) == -1) {
