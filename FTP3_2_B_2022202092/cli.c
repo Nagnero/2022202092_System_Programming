@@ -81,8 +81,10 @@ int main(int argc, char **argv) {
         memset(&temp, 0, sizeof(temp));  // Clear structure
         temp.sin_family = AF_INET;  // Set family to IPv4
         temp.sin_addr.s_addr = inet_addr(argv[1]);  // Set IP address
-        temp.sin_port = htons((unsigned short)((rand()%20000) + 10001));  // Set port number
+        int temp_port = (uint16_t)((rand()%20000) + 10001);
+        temp.sin_port = htons(temp_port);  // Set port number
         /////////////////////////////////////////////////////////////////////////////////////////
+        hostport = convert_addr_to_str(temp.sin_addr.s_addr, temp.sin_port);
 
         /* convert ls (including options) to NLST (including options) */
         if (conv_cmd(buff, cmd_buff) != 0) {
@@ -91,27 +93,23 @@ int main(int argc, char **argv) {
             close(sockfd_control);
             exit(1);
         }
-
         // send PORT command with IP address and port changed port num
-        if (strncmp(cmd_buff, "NLST", 4)) {
+        if (strncmp(cmd_buff, "NLST", 4) == 0) {
             char port_message[MAX_BUF];
-            strcpy(port_message, "PORT ");
-            strcat(port_message, hostport);
-            if(write(sockfd_control, "PORT", strlen("PORT")) != 4) {
+            snprintf(port_message, MAX_BUF, "PORT %s", hostport);
+
+            if(write(sockfd_control, port_message, strlen(port_message)) < 0) {
                 write(STDERR_FILENO, "write() error!!\n", sizeof("write() error!!\n"));
                 close(sockfd_control);
                 exit(1);
             } 
+            printf("converting to %s\n", hostport);
         }
 
         if (strcmp(cmd_buff, "QUIT") == 0) {
             printf("221 Goodbye.\n");
             break;
         }
-
-        hostport = convert_addr_to_str(temp.sin_addr.s_addr, temp.sin_port);
-        printf("converting to %s\n", hostport);
-        write(sockfd_control, hostport, strlen(hostport));
         
         //////////////////////////////// make data connection ////////////////////////////////////
         if ((sockfd_data = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
@@ -127,11 +125,10 @@ int main(int argc, char **argv) {
             perror("listen");
             exit(1);
         }
-        
         // Accept the data connection from the server
-        struct sockaddr_in client;
-        socklen_t client_len = sizeof(client);
-        int clientfd = accept(sockfd_data, (struct sockaddr *)&client, &client_len);
+        socklen_t temp_len = sizeof(temp);
+        int clientfd = accept(sockfd_data, (struct sockaddr *)&temp, &temp_len);
+        printf("AS\n");
         if (clientfd < 0) {
             perror("accept");
             close(sockfd_data);

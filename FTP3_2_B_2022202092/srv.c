@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
     }
 
     char *host_ip;
-    char temp[25] = "127,0,0,1,184,75";
+    char temp[25];
     unsigned int port_num;
 
     // control connection
@@ -77,11 +77,11 @@ int main(int argc, char **argv) {
             break;
         }
         
-
         while ((n = read(clientfd, temp, MAX_BUF)) > 0) {
-            printf("ASF%s\n",temp);
+            sleep(2);
             // open data socket
             host_ip = convert_str_to_addr(temp, &port_num);
+            printf("%s %d\n", host_ip, port_num);
 
             // 데이터 소켓 연결 부분 추가
             int sockfd_data = socket(AF_INET, SOCK_STREAM, 0);
@@ -89,21 +89,24 @@ int main(int argc, char **argv) {
                 perror("socket creation failed");
                 continue;
             }
-
             struct sockaddr_in data_addr;
             memset(&data_addr, 0, sizeof(data_addr));
             data_addr.sin_family = AF_INET;
-            inet_pton(AF_INET, host_ip, &data_addr.sin_addr);
-            data_addr.sin_port = htons(port_num);
-
+            if (inet_pton(AF_INET, host_ip, &data_addr.sin_addr) <= 0) {
+                // 오류 처리: 변환 실패 시
+                perror("Invalid address/ Address not supported");
+                // 적절한 오류 처리를 추가하세요
+            }
+            data_addr.sin_port = htons((uint16_t)port_num);
+            //print_sockaddr_in(&data_addr);
+//////////////////
+    printf("AS\n");
             if (connect(sockfd_data, (struct sockaddr *)&data_addr, sizeof(data_addr)) < 0) {
                 perror("data connection failed");
                 close(sockfd_data);
                 free(host_ip);
                 continue;
             }
-
-
 
             if (cmd_process(buff, result_buff) < 0) {
                 write(STDERR_FILENO, "cmd_process() err!!\n", sizeof("cmd_process() err!!\n"));
@@ -187,6 +190,7 @@ int socketConnection(int port) {
 
 //client로부터 받은 PORT명령어에 붙은 IP주소와 포트번호를 변경
 char* convert_str_to_addr(char *str, unsigned int *port) { 
+    char temp[10];
     unsigned int ip_parts[4], port_parts[2];
     char *addr = malloc(INET_ADDRSTRLEN);
     if (addr == NULL) {
@@ -194,7 +198,7 @@ char* convert_str_to_addr(char *str, unsigned int *port) {
         exit(EXIT_FAILURE);
     }
 
-    sscanf(str, "%u,%u,%u,%u,%u,%u", &ip_parts[0], &ip_parts[1], &ip_parts[2], &ip_parts[3], &port_parts[0], &port_parts[1]);
+    sscanf(str, "%s %u,%u,%u,%u,%u,%u", temp, &ip_parts[0], &ip_parts[1], &ip_parts[2], &ip_parts[3], &port_parts[0], &port_parts[1]);
 
     snprintf(addr, INET_ADDRSTRLEN, "%u.%u.%u.%u", ip_parts[0], ip_parts[1], ip_parts[2], ip_parts[3]);
     *port = (port_parts[0] << 8) | port_parts[1];
