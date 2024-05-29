@@ -20,7 +20,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define MAX_BUF 1024 * 1024  // Maximum buffer size for data
+#define MAX_BUF 3024  // Maximum buffer size for data
 
 char* convert_addr_to_str(unsigned long ip_addr, unsigned int port);
 void parse_options(int argc, char *argv[], int *aflag, int *lflag, int *oflag);
@@ -43,23 +43,22 @@ int main(int argc, char **argv) {
     if (argc != 3)
         exit(EXIT_FAILURE);  // Ensure proper usage
 
-    char *hostport;
-    char buff[MAX_BUF], cmd_buff[MAX_BUF];
-    struct sockaddr_in temp; // data connection
+    char buff[MAX_BUF], control_buff[MAX_BUF], data_buff[MAX_BUF];
     struct sockaddr_in servaddr;  // Server address structure
-    int sockfd_control, sockfd_data;  // Socket file descriptor
+    int sockfd_control, sockfd_data, n;  // Socket file descriptor
 
     /////////////////////// address and PORT for control connect ////////////////////////////
+    {
     memset(&servaddr, 0, sizeof(servaddr));  // Clear structure
     servaddr.sin_family = AF_INET;  // Set family to IPv4
     servaddr.sin_addr.s_addr = inet_addr(argv[1]);  // Set IP address
     servaddr.sin_port = htons((uint16_t)atoi(argv[2]));  // Set port number
     /////////////////////////////////////////////////////////////////////////////////////////
 
-    // make control connection
+    ////////////////////////////// make control connection //////////////////////////////////
     sockfd_control = socket(AF_INET, SOCK_STREAM, 0);  // Create a socket for IPv4 and TCP
     if (sockfd_control < 0) {
-        perror("socket creation failed");  // Print error if socket creation fails
+        perror("client contol socket creation failed");  // Print error if socket creation fails
         exit(EXIT_FAILURE);
     }
 
@@ -67,6 +66,8 @@ int main(int argc, char **argv) {
         perror("Connection failed");
         exit(EXIT_FAILURE);
     }
+    }
+    /////////////////////////////////////////////////////////////////////////////////////////
 
     while(sockfd_control != -1) {
         memset(buff, 0, sizeof(buff)); // initialize buffer
@@ -77,90 +78,105 @@ int main(int argc, char **argv) {
         }
         buff[strcspn(buff, "\n")] = '\0';
 
+        // change user cmd to FTP cmd
+        conv_cmd(buff, data_buff);
+
+        ////////////////////////////// make data connection //////////////////////////////////
+        char *hostport;
+        struct sockaddr_in clientaddr; // data connection
         /////////////////////// ip address and PORT for data connect ////////////////////////////
-        memset(&temp, 0, sizeof(temp));  // Clear structure
-        temp.sin_family = AF_INET;  // Set family to IPv4
-        temp.sin_addr.s_addr = inet_addr(argv[1]);  // Set IP address
+        memset(&clientaddr, 0, sizeof(clientaddr));  // Clear structure
+        clientaddr.sin_family = AF_INET;  // Set family to IPv4
+        clientaddr.sin_addr.s_addr = inet_addr(argv[1]);  // Set IP address
         int temp_port = (uint16_t)((rand()%20000) + 10001);
-        temp.sin_port = htons(temp_port);  // Set port number
+        clientaddr.sin_port = htons(temp_port);  // Set port number
         /////////////////////////////////////////////////////////////////////////////////////////
-        hostport = convert_addr_to_str(temp.sin_addr.s_addr, temp.sin_port);
+        hostport = convert_addr_to_str(clientaddr.sin_addr.s_addr, clientaddr.sin_port);
 
-        /* convert ls (including options) to NLST (including options) */
-        if (conv_cmd(buff, cmd_buff) != 0) {
-            write(STDERR_FILENO, "conv_cmd() error!!\n", strlen("conv_cmd() error!!\n"));
-            write(sockfd_control, cmd_buff, strlen(cmd_buff));
-            close(sockfd_control);
-            exit(1);
-        }
-        // send PORT command with IP address and port changed port num
-        if (strncmp(cmd_buff, "NLST", 4) == 0) {
-            char port_message[MAX_BUF];
-            snprintf(port_message, MAX_BUF, "PORT %s", hostport);
 
-            if(write(sockfd_control, port_message, strlen(port_message)) < 0) {
-                write(STDERR_FILENO, "write() error!!\n", sizeof("write() error!!\n"));
-                close(sockfd_control);
+        if (strncmp(data_buff, "NLST", 4) == 0) {
+            char control_cmd[MAX_BUF];
+            snprintf(control_cmd, MAX_BUF, "%s %s", "PORT", hostport);
+            write(sockfd_control, control_cmd, strlen(control_cmd)); // send control command
+            printf("converting to %s\n", control_cmd);
+
+            sockfd_data = socket(AF_INET, SOCK_STREAM, 0);
+            if (sockfd_data < 0) {
+                perror("client data socket creation failed");  // Print error if socket creation fails
+                exit(EXIT_FAILURE);
+            }
+            if (bind(sockfd_data, (struct sockaddr *)&clientaddr, sizeof(clientaddr)) < 0) {
+                perror("client data bind");
+                close(sockfd_data); 
                 exit(1);
-            } 
-            printf("converting to %s\n", hostport);
-        }
+            }
+            if (listen(sockfd_data, 5)) {
+                perror("client data listen");
+                exit(1);
+            }
 
-        if (strcmp(cmd_buff, "QUIT") == 0) {
-            printf("221 Goodbye.\n");
-            break;
+            socklen_t client_len = sizeof(clientaddr);
+            int clientfd_data = accept(sockfd_data, (struct sockaddr *)&clientaddr, &client_len);
+
+            // receive and print 200 control connection result
+            n = read(sockfd_control, control_buff, MAX_BUF);
+            if (n < 0) {
+                perror("Error reading from control socket");
+                exit(EXIT_FAILURE);
+            }
+            write(STDOUT_FILENO, control_buff, n);
+            memset(control_buff, 0, sizeof(control_buff));
+
+            // send FTP command as with data socket
+            n = write(clientfd_data, data_buff, strlen(data_buff));
+            if (n < 0) {
+                perror("Error writing to data socket");
+                exit(EXIT_FAILURE);
+            }
+
+            // receive and print 150 control connection success
+            n = read(sockfd_control, data_buff, MAX_BUF);
+            if (n < 0) {
+                perror("Error reading from data socket");
+                exit(EXIT_FAILURE);
+            }
+            write(STDOUT_FILENO, data_buff, n);
+            memset(data_buff, 0, sizeof(data_buff));
+
+            // receive FTP result and print
+            int size;
+            size = read(clientfd_data, data_buff, MAX_BUF);
+            if (n < 0) {
+                perror("Error reading from data socket");
+                exit(EXIT_FAILURE);
+            }
+            write(STDOUT_FILENO, data_buff, size);
+            memset(data_buff, 0, sizeof(data_buff));
+            
+
+            // receive and print 226 control connection result
+            n = read(sockfd_control, control_buff, MAX_BUF);
+            if (n < 0) {
+                perror("Error reading from control socket");
+                exit(EXIT_FAILURE);
+            }
+            write(STDOUT_FILENO, control_buff, n);
+            char msg[MAX_BUF];
+            snprintf(msg, sizeof(msg), "OK. %d bytes received.\n", size);
+            write(STDOUT_FILENO, msg, strlen(msg));
+            memset(control_buff, 0, sizeof(control_buff));
+
+            close(clientfd_data);
+            close(sockfd_data);
+            /////////////////////////////////////////////////////////////////////////////////////////
         }
         
-        //////////////////////////////// make data connection ////////////////////////////////////
-        if ((sockfd_data = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
-            perror("socket");
-            return -1;
-        }
-        if (bind(sockfd_data, (struct sockaddr *)&temp, sizeof(temp)) < 0) {
-            perror("bind");
-            close(sockfd_data); 
-            exit(1);
-        }
-        if (listen(sockfd_data, 5)) {
-            perror("listen");
-            exit(1);
-        }
-        // Accept the data connection from the server
-        socklen_t temp_len = sizeof(temp);
-        int clientfd = accept(sockfd_data, (struct sockaddr *)&temp, &temp_len);
-        printf("AS\n");
-        if (clientfd < 0) {
-            perror("accept");
-            close(sockfd_data);
-            exit(1);
-        }
-
-        // Send the NLST command to the server
-        if (write(sockfd_control, cmd_buff, strlen(cmd_buff)) != (ssize_t)strlen(cmd_buff)) {
-            perror("write");
-            close(sockfd_control);
-            close(sockfd_data);
-            close(clientfd);
-            exit(1);
-        }
-
-        // Read data from the server and print it to stdout
-        int n;
-        while ((n = read(clientfd, buff, sizeof(buff) - 1)) > 0) {
-            buff[n] = '\0';
-            printf("%s", buff);
-        }
-
-        if (n < 0) {
-            perror("read");
-        }
-        close(sockfd_data);
-        //////////////////////////////////////////////////////////////////////////////////////////
+        memset(buff, 0, sizeof(buff));
+        break;
     }
     close(sockfd_control);
     return 0;
 }
-
 
  //자신의 IP주소와 임의의 포트번호를 PORT명령어에 붙는 형태로 변경
 char* convert_addr_to_str(unsigned long ip_addr, unsigned int port) {
@@ -222,6 +238,7 @@ void parse_options(int argc, char *argv[], int *aflag, int *lflag, int *oflag) {
         }
     }
 }
+
 
 //////////////////////////////////////////////////////////////////////
 // conv_cmd                                                         //
